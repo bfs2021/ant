@@ -88,9 +88,14 @@ func TestSystem(t *testing.T) {
 
 			tracer.After(ctx, statement, ant.Outcome{})
 
+			spans := recorder.Ended()
+			if len(spans) != 1 {
+				t.Fatalf("ended spans: %d", len(spans))
+			}
+
 			got := ""
 
-			for _, a := range recorder.Ended()[0].Attributes() {
+			for _, a := range spans[0].Attributes() {
 				if a.Key == "db.system" {
 					got = a.Value.AsString()
 				}
@@ -114,6 +119,11 @@ func TestSpanName(t *testing.T) {
 		{"SELECT\n* FROM users", "db.select"},
 		{"select\t1", "db.select"},
 		{"(SELECT 1) UNION SELECT 2", "db.select"},
+		{"( ( SELECT 1) )", "db.select"},
+		{"-- pick one\nSELECT 1", "db.select"},
+		{"WITH a AS (SELECT 1) SELECT * FROM a", "db.select"},
+		{"MERGE INTO t USING s ON 1 = 1", "db.merge"},
+		{"SAVEPOINT ant_sp_1", "db.savepoint"},
 		{"PRAGMA foreign_keys = ON", "db.query"},
 		{"   ", "db.query"},
 	}
@@ -130,7 +140,12 @@ func TestSpanName(t *testing.T) {
 
 		tracer.After(ctx, &ant.Statement{SQL: c.sql}, ant.Outcome{})
 
-		if got := recorder.Ended()[0].Name(); got != c.want {
+		spans := recorder.Ended()
+		if len(spans) != 1 {
+			t.Fatalf("ended spans for %q: %d", c.sql, len(spans))
+		}
+
+		if got := spans[0].Name(); got != c.want {
 			t.Errorf("span name for %q = %q, want %q", c.sql, got, c.want)
 		}
 	}

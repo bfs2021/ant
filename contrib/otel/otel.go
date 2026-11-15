@@ -13,7 +13,7 @@ import (
 
 	"github.com/skudra-go/ant"
 	"github.com/skudra-go/ant/dialect"
-	"github.com/skudra-go/ant/internal/opname"
+	"github.com/skudra-go/ant/metrics"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -76,7 +76,7 @@ var systems = map[string]string{
 
 // Before implements ant.Interceptor.
 func (t *Tracer) Before(ctx context.Context, s *ant.Statement) (context.Context, error) {
-	name := opname.Operation(s.SQL)
+	name := metrics.Operation(s.SQL)
 	ctx, span := t.tracer.Start(
 		ctx,
 		"db."+name,

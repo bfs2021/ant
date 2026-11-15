@@ -708,6 +708,7 @@ metrics: func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request)
 metrics: func (m *Metrics) Snapshot() []Sample
 metrics: func (m *Metrics) WritePrometheus(w io.Writer)
 metrics: func New() *Metrics
+metrics: func Operation(text string) string
 metrics: type Metrics
 metrics: type Sample
 migrate: const Absorbed
