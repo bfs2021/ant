@@ -36,16 +36,16 @@ var known = map[string]bool{
 }
 
 // Operation returns the lowercase operation a statement performs: the first
-// word of its SQL, after any leading comments, parentheses, and whitespace. It
-// names a common table expression after the statement the CTEs feed, and
-// returns query when that word is not one ant emits.
+// word of its SQL after any leading comments, parentheses, and whitespace. A
+// common table expression is named after the statement the CTEs feed, and a
+// word that is not one ant emits is reported as query.
 func Operation(text string) string {
-	rest, word := cutWord(skipLeading(text))
-
-	if word == "with" {
-		word = statementWord(rest)
+	i := skipLeading(text, 0)
+	if word, next, ok := cutWord(text, i); ok && word == "with" {
+		i = skipCTEs(text, next)
 	}
 
+	word := statementWord(text, i)
 	if !known[word] {
 		return "query"
 	}
@@ -53,55 +53,155 @@ func Operation(text string) string {
 	return word
 }
 
-// skipLeading drops the comments, parentheses, and whitespace before the
-// statement's first word.
-func skipLeading(text string) string {
+// skipLeading returns the index of the statement's first word, past the
+// whitespace, comments, and opening parentheses before it.
+func skipLeading(text string, i int) int {
 	for {
-		text = strings.TrimLeft(text, " \t\n\r\f(")
+		i = skipBlanks(text, i)
+		if i < len(text) && text[i] == '(' {
+			i++
 
+			continue
+		}
+
+		return i
+	}
+}
+
+// skipBlanks returns the index of the first character at or after i that is
+// neither whitespace nor part of a comment.
+func skipBlanks(text string, i int) int {
+	for i < len(text) {
 		switch {
-		case strings.HasPrefix(text, "--"):
-			nl := strings.IndexByte(text, '\n')
+		case strings.ContainsRune(" \t\n\r\f", rune(text[i])):
+			i++
+		case text[i] == '-' && strings.HasPrefix(text[i:], "--"):
+			nl := strings.IndexByte(text[i:], '\n')
 			if nl < 0 {
-				return ""
+				return len(text)
 			}
 
-			text = text[nl+1:]
-		case strings.HasPrefix(text, "/*"):
-			end := strings.Index(text, "*/")
+			i += nl + 1
+		case text[i] == '/' && strings.HasPrefix(text[i:], "/*"):
+			end := strings.Index(text[i:], "*/")
 			if end < 0 {
-				return ""
+				return len(text)
 			}
 
-			text = text[end+2:]
+			i += end + 2
 		default:
-			return text
+			return i
 		}
 	}
+
+	return i
 }
 
-// cutWord returns text after a leading word of letters, and that word in lower
-// case. A text that does not start with a letter has no word.
-func cutWord(text string) (string, string) {
-	i := 0
+// skipCTEs returns the index just past the common table expressions that start
+// at i, that is, after the last body and before the statement they feed. A CTE
+// is a name, an optional column list, AS, and a parenthesized body.
+func skipCTEs(text string, i int) int {
+	for {
+		i = skipBlanks(text, i)
 
-	for i < len(text) && isLetter(text[i]) {
+		name, next, ok := cutIdent(text, i)
+		if !ok {
+			return i
+		}
+
+		if name == "recursive" {
+			i = next
+
+			continue
+		}
+
+		i = skipBlanks(text, next)
+		if i < len(text) && text[i] == '(' {
+			end := skipParens(text, i)
+			if end < 0 {
+				return i
+			}
+
+			i = skipBlanks(text, end)
+		}
+
+		if word, after, ok := cutWord(text, i); ok && word == "as" {
+			i = skipBlanks(text, after)
+		}
+
+		for {
+			word, after, ok := cutWord(text, i)
+			if !ok || word != "not" && word != "materialized" {
+				break
+			}
+
+			i = skipBlanks(text, after)
+		}
+
+		if i >= len(text) || text[i] != '(' {
+			return i
+		}
+
+		end := skipParens(text, i)
+		if end < 0 {
+			return i
+		}
+
+		i = skipBlanks(text, end)
+		if i >= len(text) || text[i] != ',' {
+			return i
+		}
+
 		i++
 	}
-
-	if i == 0 {
-		return text, ""
-	}
-
-	return text[i:], strings.ToLower(text[:i])
 }
 
-// statementWord returns the word of the statement the CTEs feed, skipping the
-// words inside parentheses, quotes, and comments, which belong to the CTEs.
-func statementWord(text string) string {
+// skipParens returns the index after the parenthesis that closes the one at
+// text[i], or -1 when the text ends first.
+func skipParens(text string, i int) int {
 	depth := 0
 
-	for i := 0; i < len(text); {
+	for i < len(text) {
+		switch c := text[i]; {
+		case c == '(':
+			depth++
+			i++
+		case c == ')':
+			depth--
+			i++
+			if depth == 0 {
+				return i
+			}
+		case isQuote(c):
+			i = skipQuoted(text, i)
+		case c == '-' && strings.HasPrefix(text[i:], "--"):
+			nl := strings.IndexByte(text[i:], '\n')
+			if nl < 0 {
+				return -1
+			}
+
+			i += nl + 1
+		case c == '/' && strings.HasPrefix(text[i:], "/*"):
+			end := strings.Index(text[i:], "*/")
+			if end < 0 {
+				return -1
+			}
+
+			i += end + 2
+		default:
+			i++
+		}
+	}
+
+	return -1
+}
+
+// statementWord returns the first word of a statement at or after i, skipping
+// the words inside parentheses, quotes, and comments.
+func statementWord(text string, i int) string {
+	depth := 0
+
+	for i < len(text) {
 		switch c := text[i]; {
 		case c == '(':
 			depth++
@@ -112,7 +212,7 @@ func statementWord(text string) string {
 			}
 
 			i++
-		case c == '\'' || c == '"' || c == '`':
+		case isQuote(c):
 			i = skipQuoted(text, i)
 		case c == '-' && strings.HasPrefix(text[i:], "--"):
 			nl := strings.IndexByte(text[i:], '\n')
@@ -147,25 +247,26 @@ func statementWord(text string) string {
 }
 
 // skipQuoted returns the index after the quoted text that starts at text[i]. A
-// doubled quote stands for itself, and a backslash escapes the next character
-// in a quote that is not a backtick.
+// doubled closing quote stands for itself. Standard SQL and PostgreSQL treat a
+// backslash as an ordinary character, so it does not escape anything here.
 func skipQuoted(text string, i int) int {
 	quote := text[i]
+	closer := quote
+	if quote == '[' {
+		closer = ']'
+	}
+
 	i++
 
 	for i < len(text) {
-		if text[i] == quote {
-			if i+1 < len(text) && text[i+1] == quote {
+		if text[i] == closer {
+			if i+1 < len(text) && text[i+1] == closer {
 				i += 2
+
 				continue
 			}
 
 			return i + 1
-		}
-
-		if text[i] == '\\' && quote != '`' {
-			i += 2
-			continue
 		}
 
 		i++
@@ -174,7 +275,41 @@ func skipQuoted(text string, i int) int {
 	return i
 }
 
+// cutWord returns a leading word of letters in lower case and the index after
+// it. The second result is false when no letter starts at i.
+func cutWord(text string, i int) (string, int, bool) {
+	start := i
+
+	for i < len(text) && isLetter(text[i]) {
+		i++
+	}
+
+	if i == start {
+		return "", start, false
+	}
+
+	return strings.ToLower(text[start:i]), i, true
+}
+
+// cutIdent is cutWord for an identifier, which may also contain digits and
+// underscores.
+func cutIdent(text string, i int) (string, int, bool) {
+	start := i
+
+	for i < len(text) && (isLetter(text[i]) || '0' <= text[i] && text[i] <= '9' || text[i] == '_') {
+		i++
+	}
+
+	if i == start || !isLetter(text[start]) {
+		return "", start, false
+	}
+
+	return strings.ToLower(text[start:i]), i, true
+}
+
 func isLetter(c byte) bool { return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' }
+
+func isQuote(c byte) bool { return c == '\'' || c == '"' || c == '`' || c == '[' }
 
 // buckets are the histogram's upper bounds, in seconds.
 var buckets = []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5}

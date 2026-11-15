@@ -78,9 +78,28 @@ func TestOperation(t *testing.T) {
 		"SELECT 1":                          "select",
 		"/* tag */ insert into x":           "insert",
 		"( SELECT 1)":                       "select",
+		"(( SELECT 1))":                     "select",
+		"-- note\nSELECT 1":                 "select",
+		"/* c */ ( /* d */ select 1)":       "select",
 		"WITH a AS (SELECT 1) SELECT 1":     "select",
 		"WITH a AS (SELECT 1) MERGE INTO t": "merge",
 		"PRAGMA foreign_keys = ON":          "query",
+		"SAVEPOINT sp1":                     "savepoint",
+		"ROLLBACK TO SAVEPOINT sp1":         "rollback",
+		"RELEASE SAVEPOINT sp1":             "release",
+		// The name of a CTE must not be mistaken for the operation.
+		"WITH update_log AS (SELECT 1) SELECT * FROM update_log":      "select",
+		"WITH select_ids AS (SELECT id FROM t) DELETE FROM t":         "delete",
+		"WITH delete_rows AS (SELECT 1) UPDATE t SET x = 1":           "update",
+		"WITH RECURSIVE t(n) AS (SELECT 1) SELECT n FROM t":           "select",
+		"WITH a(x, y) AS (SELECT 1, 2), b AS (SELECT 3) MERGE INTO t": "merge",
+		"WITH a AS MATERIALIZED (SELECT 1) SELECT 1":                  "select",
+		// Bracketed identifiers are quotes in the SQL Server dialect.
+		"WITH a AS (SELECT [update] FROM t) SELECT 1":    "select",
+		"WITH a AS (SELECT [b]]c] FROM t) DELETE FROM t": "delete",
+		// A backslash is an ordinary character in standard SQL and PostgreSQL.
+		`WITH a AS (SELECT 'C:\') SELECT 1`:     "select",
+		`WITH a AS (SELECT 'it''s) ok') DELETE`: "delete",
 	}
 
 	for sql, want := range cases {
