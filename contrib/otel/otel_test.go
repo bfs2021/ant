@@ -102,3 +102,36 @@ func TestSystem(t *testing.T) {
 		})
 	}
 }
+
+// A span is named after the operation, not the first chunk of SQL.
+func TestSpanName(t *testing.T) {
+	cases := []struct {
+		sql  string
+		want string
+	}{
+		{"SELECT * FROM users", "db.select"},
+		{"/* users */ SELECT 1", "db.select"},
+		{"SELECT\n* FROM users", "db.select"},
+		{"select\t1", "db.select"},
+		{"(SELECT 1) UNION SELECT 2", "db.select"},
+		{"PRAGMA foreign_keys = ON", "db.query"},
+		{"   ", "db.query"},
+	}
+
+	for _, c := range cases {
+		recorder := tracetest.NewSpanRecorder()
+		provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+		tracer := New(provider.Tracer("test"))
+
+		ctx, err := tracer.Before(context.Background(), &ant.Statement{SQL: c.sql})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		tracer.After(ctx, &ant.Statement{SQL: c.sql}, ant.Outcome{})
+
+		if got := recorder.Ended()[0].Name(); got != c.want {
+			t.Errorf("span name for %q = %q, want %q", c.sql, got, c.want)
+		}
+	}
+}

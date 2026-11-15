@@ -10,10 +10,10 @@ package otel
 
 import (
 	"context"
-	"strings"
 
 	"github.com/skudra-go/ant"
 	"github.com/skudra-go/ant/dialect"
+	"github.com/skudra-go/ant/internal/opname"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -76,10 +76,10 @@ var systems = map[string]string{
 
 // Before implements ant.Interceptor.
 func (t *Tracer) Before(ctx context.Context, s *ant.Statement) (context.Context, error) {
-	name, _, _ := strings.Cut(strings.TrimSpace(s.SQL), " ")
+	name := opname.Operation(s.SQL)
 	ctx, span := t.tracer.Start(
 		ctx,
-		"db."+strings.ToLower(name),
+		"db."+name,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
 			attribute.String("db.system", t.system),

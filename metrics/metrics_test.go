@@ -39,3 +39,21 @@ func TestCounts(t *testing.T) {
 		t.Fatalf("snapshot: %+v", m.Snapshot())
 	}
 }
+
+// A kind is the statement's operation, whatever precedes the first word.
+func TestKind(t *testing.T) {
+	cases := map[string]string{
+		"SELECT 1":                  "SELECT",
+		"/* tag */ insert into x":   "INSERT",
+		"(SELECT 1) UNION SELECT 2": "SELECT",
+		"delete from users":         "DELETE",
+		"PRAGMA foreign_keys = ON":  "QUERY",
+		"":                          "QUERY",
+	}
+
+	for sql, want := range cases {
+		if got := kind(sql); got != want {
+			t.Errorf("kind(%q) = %q, want %q", sql, got, want)
+		}
+	}
+}

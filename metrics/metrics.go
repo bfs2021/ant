@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/skudra-go/ant"
+	"github.com/skudra-go/ant/internal/opname"
 )
 
 // buckets are the histogram's upper bounds, in seconds.
@@ -45,24 +46,9 @@ func (m *Metrics) Before(ctx context.Context, _ *ant.Statement) (context.Context
 	return ctx, nil
 }
 
-// kind returns a statement's first word, which keeps the number of series small.
-func kind(text string) string {
-	text = strings.TrimSpace(text)
-	for strings.HasPrefix(text, "/*") {
-		end := strings.Index(text, "*/")
-		if end < 0 {
-			break
-		}
-
-		text = strings.TrimSpace(text[end+2:])
-	}
-
-	if i := strings.IndexAny(text, " \n\t"); i > 0 {
-		text = text[:i]
-	}
-
-	return strings.ToUpper(text)
-}
+// kind returns the statement's operation in upper case, which keeps the
+// number of series small.
+func kind(text string) string { return strings.ToUpper(opname.Operation(text)) }
 
 // After implements ant.Interceptor.
 func (m *Metrics) After(_ context.Context, s *ant.Statement, o ant.Outcome) {
